@@ -1,11 +1,11 @@
 import { discoverCatalogue } from "./catalogue.js";
 import { extractAllBooks } from "./detail.js";
+import { validateAndStore } from "./validate.js";
 
 async function main() {
   const { uniqueUrls, sourcePageOf } = await discoverCatalogue();
-  const records = await extractAllBooks(uniqueUrls, sourcePageOf);
-
-  console.log(JSON.stringify(records[0], null, 2));
+  const rawRecords = await extractAllBooks(uniqueUrls, sourcePageOf);
+  await validateAndStore(rawRecords);
 }
 
 main().catch((err) => {
