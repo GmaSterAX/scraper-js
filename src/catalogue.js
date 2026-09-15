@@ -23,6 +23,7 @@ function parseCataloguePage(html, pageUrl) {
 
 export async function discoverCatalogue() {
   const allBookUrls = [];
+  const sourcePageOf = new Map(); // bookUrl -> catalogue page it came from
   let pageUrl = BASE;
   let pageCount = 0;
 
@@ -34,7 +35,10 @@ export async function discoverCatalogue() {
     if (!fromCache) await delay(DELAY_MS);
 
     const { bookUrls, nextUrl } = parseCataloguePage(html, pageUrl);
-    allBookUrls.push(...bookUrls);
+    for (const bookUrl of bookUrls) {
+      allBookUrls.push(bookUrl);
+      if (!sourcePageOf.has(bookUrl)) sourcePageOf.set(bookUrl, pageUrl);
+    }
     pageUrl = nextUrl;
   }
 
@@ -43,5 +47,5 @@ export async function discoverCatalogue() {
     `catalogue_pages=${pageCount} discovered=${allBookUrls.length} unique_urls=${uniqueUrls.length}`
   );
 
-  return uniqueUrls;
+  return { uniqueUrls, sourcePageOf };
 }
