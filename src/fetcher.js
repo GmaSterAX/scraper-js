@@ -1,33 +1,25 @@
 import fs from "fs/promises";
 import path from "path";
 
-const USER_AGENT = "FlyRankAIInternship/1.0 (https://github.com/GmaSterAX)";
+const USER_AGENT = "FlyRankInternshipA9/1.0 (+https://github.com/GmaSterAX/scraper-js)";
 const TIMEOUT_MS = 8000;
+const RETRY_WAIT_MS = 1500;
 const CACHE_DIR = path.join(process.cwd(), "cache");
 
-function cacheFilenameFor(url) {
-    const clean = url
-        .replace(/^https?:\/\//, "")
-        .replace(/[^a-zA-Z0-9]/g, "_");
-    return path.join(CACHE_DIR, `${clean}.htmkl`);
+// Counters used by the run report
+export const stats = { pagesFetched: 0, cacheHits: 0 };
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function fetchAndCache(url, { cacheName } = {}) {
-    await fs.mkdir(CACHE_DIR, { recursive: true});
+function cacheFilenameFor(url) {
+  const clean = url.replace(/^https?:\/\//, "").replace(/[^a-zA-Z0-9]/g, "_");
+  return path.join(CACHE_DIR, `${clean}.html`);
+}
 
-   const cachePath = cacheName
-    ? path.join(CACHE_DIR, cacheName)
-    : cacheFilenameFor(url);
-
-    try {
-    const cached = await fs.readFile(cachePath, "utf-8");
-    console.log(`CACHE HIT  ${url}  (${cached.length} bytes)`);
-    return { html: cached, fromCache: true };
-  } catch {
-    // not cached yet, continue to real fetch
-  }
-
-  // 2. Real fetch with timeout, user-agent, status check
+// One real request. Marks the error as retryable or not.
+async function fetchOnce(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -38,18 +30,53 @@ export async function fetchAndCache(url, { cacheName } = {}) {
       signal: controller.signal,
     });
   } catch (err) {
+    const error = new Error(`Request failed for ${url}: ${err.message}`);
+    error.retryable = true;
+    throw error;
+  } finally {
     clearTimeout(timeout);
-    throw new Error(`Request failed for ${url}: ${err.message}`);
   }
-  clearTimeout(timeout);
 
   if (response.status !== 200) {
-    throw new Error(`Non-200 status (${response.status}) for ${url}`);
+    const error = new Error(`Non-200 status (${response.status}) for ${url}`);
+    error.retryable = response.status >= 500;
+    throw error;
   }
 
-  const html = await response.text();
+  return response.text();
+}
+
+export async function fetchAndCache(url, { cacheName } = {}) {
+  await fs.mkdir(CACHE_DIR, { recursive: true });
+
+  const cachePath = cacheName
+    ? path.join(CACHE_DIR, cacheName)
+    : cacheFilenameFor(url);
+
+  // 1. Cache first
+  try {
+    const cached = await fs.readFile(cachePath, "utf-8");
+    console.log(`CACHE HIT  ${url}  (${cached.length} bytes)`);
+    stats.cacheHits++;
+    return { html: cached, fromCache: true };
+  } catch {
+    // not cached yet
+  }
+
+  
+  let html;
+  try {
+    html = await fetchOnce(url);
+  } catch (err) {
+    if (!err.retryable) throw err;
+    console.log(`RETRY      ${url}  (${err.message})`);
+    await wait(RETRY_WAIT_MS);
+    html = await fetchOnce(url);
+  }
+
   await fs.writeFile(cachePath, html, "utf-8");
   console.log(`FETCH      ${url}  (${html.length} bytes)`);
+  stats.pagesFetched++;
 
   return { html, fromCache: false };
 }
